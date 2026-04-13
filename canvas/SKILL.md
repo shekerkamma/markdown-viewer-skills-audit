@@ -1,6 +1,6 @@
 ---
 name: canvas
-description: Create spatial node-based diagrams with free positioning. Best for mind maps, knowledge graphs, concept maps, and planning boards where precise spatial layout matters. Use JSON format with x/y coordinates. NOT for sequential flows (use uml) or data charts (use vega).
+description: Create spatial diagrams with free-positioned nodes using JSON format. Best for concept maps, knowledge graphs, and planning boards requiring precise x/y coordinate control.
 metadata:
   author: Canvas is powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
 ---

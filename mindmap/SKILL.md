@@ -1,6 +1,6 @@
 ---
 name: mindmap
-description: Create hierarchical mind maps using PlantUML @startmindmap syntax. Best for brainstorming, topic decomposition, study notes, decision trees, and concept hierarchies with automatic layout. Supports left/right branches, direction control, per-node colors/styles, and rich text blocks. NOT for free-position canvas maps (use canvas), UML interaction diagrams (use uml), or business workflows (use bpmn).
+description: Create hierarchical mind maps using PlantUML @startmindmap syntax. Best for brainstorming, topic decomposition, study notes, and decision trees with automatic radial layout, left/right branches, and per-node styling.
 metadata:
   author: Mindmap diagrams are powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
 ---

@@ -1,6 +1,6 @@
 ---
 name: uml
-description: Create UML (Unified Modeling Language) diagrams using PlantUML syntax. Best for software modeling including Class, Sequence, Activity, State Machine, Component, Use Case, Deployment, and flowchart diagrams. Also suitable for dependency graphs, module relationships, and package hierarchies. Uses concise text-based notation that auto-layouts. NOT for layered system architecture (use architecture), data charts (use vega), or business process modeling (use bpmn).
+description: Create UML diagrams using PlantUML syntax. Best for software modeling — Class, Sequence, Activity, State Machine, Component, Use Case, and Deployment diagrams with concise text-based notation and auto-layout.
 metadata:
   author: UML diagrams are powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
 ---
