@@ -2,7 +2,7 @@
 name: data-analytics
 description: Create data pipeline and analytics architecture diagrams using PlantUML syntax with database/analytics stencil icons. Best for ETL pipelines, data lakes, real-time streaming, data warehousing, and BI dashboard design.
 metadata:
-  author: Data analytics diagrams are powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
+  author: xicilion (upstream markdown-viewer/skills); audited fork by shekerkamma
 ---
 
 # Data Analytics Diagram Generator

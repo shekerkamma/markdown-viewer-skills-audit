@@ -2,7 +2,7 @@
 name: infographic
 description: Create template-based infographics with space-separated key-value syntax (NOT YAML). Best for KPI dashboards, timelines, roadmaps, SWOT analysis, funnels, comparisons, and org charts with quick visual impact.
 metadata:
-  author: Infographic is powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
+  author: xicilion (upstream markdown-viewer/skills); audited fork by shekerkamma
 ---
 
 # Infographic Visualizer

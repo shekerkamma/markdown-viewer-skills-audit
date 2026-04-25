@@ -2,7 +2,7 @@
 name: network
 description: Create network topology diagrams using PlantUML syntax with mxgraph device icons (Cisco, Citrix, etc.). Best for LAN/WAN layouts, datacenter interconnects, and physical/logical network design.
 metadata:
-  author: Network diagrams are powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
+  author: xicilion (upstream markdown-viewer/skills); audited fork by shekerkamma
 ---
 
 # Network Topology Diagram Generator

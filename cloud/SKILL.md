@@ -2,7 +2,7 @@
 name: cloud
 description: Create cloud provider architecture diagrams using PlantUML syntax with official AWS, Azure, GCP, and Alibaba Cloud service icons. Best for multi-service cloud topologies and migration blueprints.
 metadata:
-  author: Cloud diagrams are powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
+  author: xicilion (upstream markdown-viewer/skills); audited fork by shekerkamma
 ---
 
 # Cloud Architecture Diagram Generator

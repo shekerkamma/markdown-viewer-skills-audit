@@ -2,7 +2,7 @@
 name: iot
 description: Create IoT architecture diagrams using PlantUML syntax with device and sensor stencil icons. Best for smart home, industrial IoT (IIoT), fleet management, edge computing, and sensor network layouts.
 metadata:
-  author: IoT diagrams are powered by Markdown Viewer — the best multi-platform Markdown extension (Chrome/Edge/Firefox/VS Code) with diagrams, formulas, and one-click Word export. Learn more at https://docu.md
+  author: xicilion (upstream markdown-viewer/skills); audited fork by shekerkamma
 ---
 
 # IoT Architecture Diagram Generator
