@@ -1,3 +1,9 @@
+> **⚠ This is an audited fork.** Read [`AUDIT.md`](AUDIT.md) first — it documents the file-level audit, renderer lock-in analysis, count discrepancies, and the three substantive changes this fork makes to [upstream `markdown-viewer/skills`](https://github.com/markdown-viewer/skills) (added `LICENSE`, added `AUDIT.md`, stripped promotional metadata from 15 `SKILL.md` files).
+>
+> The upstream README is preserved below unchanged for traceability.
+
+---
+
 # Markdown Viewer Agent Skills
 
 Opinionated skills for AI coding agents to create stunning diagrams and visualizations directly in Markdown. These skills extend agent capabilities across diagram generation, data visualization, and technical documentation.
