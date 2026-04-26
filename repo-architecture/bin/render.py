@@ -9,8 +9,15 @@ visual contract. Drift-free by construction: when the architecture skill's
 style files change, this renderer picks up the new CSS automatically — it
 never duplicates style rules.
 
-v1 supports the three-column layout only. Other layouts (single-stack,
-pipeline, two-column-split) print a warning and fall back to three-column.
+Supported layouts:
+- three-column     — main column + left + right sidebars (default)
+- single-stack     — main column only, no sidebars
+- two-column-split — main + one sidebar (whichever is populated; defaults to left)
+- pipeline         — horizontal stages with arrows; uses pipeline.md's CSS,
+                     not the palette style file (palette layouts have semantic
+                     layer colors that don't apply to stages)
+
+Anything else prints a warning and falls back to three-column.
 
 Hard deps: python3 stdlib + PyYAML.
 """
@@ -44,15 +51,23 @@ def load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text())
 
 
-def find_styles_dir(start: Path) -> Path:
-    """Walk up from the plan path looking for `architecture/styles/`. This makes
-    the script work whether run from inside the repo or via an absolute path."""
+def find_arch_dir(start: Path, leaf: str) -> Path:
+    """Walk up from the plan path looking for `architecture/<leaf>/`. Used to
+    locate both styles/ and layouts/ from any cwd."""
     here = start.resolve()
     for parent in [here, *here.parents]:
-        candidate = parent / "architecture" / "styles"
+        candidate = parent / "architecture" / leaf
         if candidate.is_dir():
             return candidate
-    raise FileNotFoundError("could not locate architecture/styles/ from " + str(start))
+    raise FileNotFoundError(f"could not locate architecture/{leaf}/ from {start}")
+
+
+def find_styles_dir(start: Path) -> Path:
+    return find_arch_dir(start, "styles")
+
+
+def find_layouts_dir(start: Path) -> Path:
+    return find_arch_dir(start, "layouts")
 
 
 def extract_style(style_md: str) -> tuple[str, str]:
@@ -133,32 +148,120 @@ def render_sidebar(panels: list[dict], prefix: str, side: str) -> str:
     return f'<div class="{prefix}-sidebar">{"".join(panel_html)}</div>'
 
 
-def render(plan: dict, styles_dir: Path, prefix: str) -> str:
-    if "error" in plan:
-        raise SystemExit(f"plan is a refusal, not a render input. reason: {plan.get('reason')}")
-
-    style_name = plan.get("style", "ocean-teal")
-    style_md = (styles_dir / f"{style_name}.md").read_text()
-    outer_inline, scoped_css = extract_style(style_md)
-    scoped_css = renamespace(scoped_css, prefix)
-
-    layout = plan.get("layout", "three-column")
-    if layout != "three-column":
-        print(f"warning: layout '{layout}' not yet supported by render.py — falling back to three-column",
-              file=sys.stderr)
-
-    title = plan.get("title", "Architecture")
-    subtitle = plan.get("subtitle", "")
+def render_layers_html(plan: dict, prefix: str) -> str:
+    """Render the canonical 6-layer stack used by all non-pipeline layouts."""
     custom_titles = plan.get("layer_titles", {}) or {}
-
-    layers_html = "".join(
+    return "".join(
         render_layer(name, plan.get("layers", {}).get(name, []) or [], prefix, custom_titles)
         for name in LAYER_ORDER
     )
 
+
+def render_three_column(plan: dict, prefix: str) -> str:
     sidebars = plan.get("sidebars", {}) or {}
     left = render_sidebar(sidebars.get("left", []) or [], prefix, "left")
     right = render_sidebar(sidebars.get("right", []) or [], prefix, "right")
+    return (
+        f'<div class="{prefix}-wrapper">'
+        f'{left}'
+        f'<div class="{prefix}-main">{render_layers_html(plan, prefix)}</div>'
+        f'{right}'
+        f'</div>'
+    )
+
+
+def render_single_stack(plan: dict, prefix: str) -> str:
+    return f'<div class="{prefix}-main">{render_layers_html(plan, prefix)}</div>'
+
+
+def render_two_column_split(plan: dict, prefix: str) -> str:
+    sidebars = plan.get("sidebars", {}) or {}
+    left_panels = sidebars.get("left", []) or []
+    right_panels = sidebars.get("right", []) or []
+    if right_panels and left_panels:
+        print("warning: two-column-split has both sidebars populated; using left only", file=sys.stderr)
+        right_panels = []
+    if right_panels and not left_panels:
+        side = render_sidebar(right_panels, prefix, "right")
+        return (
+            f'<div class="{prefix}-wrapper">'
+            f'<div class="{prefix}-main">{render_layers_html(plan, prefix)}</div>'
+            f'{side}'
+            f'</div>'
+        )
+    side = render_sidebar(left_panels, prefix, "left")
+    return (
+        f'<div class="{prefix}-wrapper">'
+        f'{side}'
+        f'<div class="{prefix}-main">{render_layers_html(plan, prefix)}</div>'
+        f'</div>'
+    )
+
+
+def render_pipeline(plan: dict, prefix: str) -> str:
+    """Pipeline maps each populated layer to a stage. Components stack vertically
+    inside each stage; arrows separate stages. Layer semantic colors don't apply
+    here — pipeline uses the layout file's flat CSS, not a palette style file."""
+    custom_titles = plan.get("layer_titles", {}) or {}
+    populated = [
+        (name, plan["layers"][name])
+        for name in LAYER_ORDER
+        if plan.get("layers", {}).get(name)
+    ]
+    if len(populated) > 5:
+        print(f"warning: pipeline has {len(populated)} stages; pipelines work best with 3-5 stages",
+              file=sys.stderr)
+    stages = []
+    for name, components in populated:
+        # Strip " Layer" suffix for cleaner stage titles.
+        title = custom_titles.get(name) or LAYER_TITLES.get(name, name).replace(" Layer", "").replace(" Services", "")
+        boxes = "".join(render_box(c, prefix) for c in components)
+        stages.append(
+            f'<div class="{prefix}-stage">'
+            f'<div class="{prefix}-stage-title">{esc(title)}</div>'
+            f'{boxes}'
+            f'</div>'
+        )
+    arrowed = f'<div class="{prefix}-arrow">→</div>'.join(stages)
+    return f'<div class="{prefix}-pipeline">{arrowed}</div>'
+
+
+LAYOUT_RENDERERS = {
+    "three-column":     render_three_column,
+    "single-stack":     render_single_stack,
+    "two-column-split": render_two_column_split,
+    "pipeline":         render_pipeline,
+}
+
+
+def render(plan: dict, styles_dir: Path, layouts_dir: Path, prefix: str) -> str:
+    if "error" in plan:
+        raise SystemExit(f"plan is a refusal, not a render input. reason: {plan.get('reason')}")
+
+    layout = plan.get("layout", "three-column")
+    body_fn = LAYOUT_RENDERERS.get(layout)
+    if body_fn is None:
+        print(f"warning: layout '{layout}' not supported — falling back to three-column", file=sys.stderr)
+        layout = "three-column"
+        body_fn = render_three_column
+
+    # Source the CSS. Pipeline ignores the palette style file because palettes
+    # encode semantic layer colors that don't apply to stages — use pipeline.md
+    # directly. Other layouts use the palette file.
+    if layout == "pipeline":
+        layout_md = (layouts_dir / "pipeline.md").read_text()
+        outer_inline, scoped_css = extract_style(layout_md)
+        style_name = "pipeline (layout-native)"
+    else:
+        style_name = plan.get("style", "ocean-teal")
+        style_md = (styles_dir / f"{style_name}.md").read_text()
+        outer_inline, scoped_css = extract_style(style_md)
+    scoped_css = renamespace(scoped_css, prefix)
+
+    title = plan.get("title", "Architecture")
+    subtitle = plan.get("subtitle", "")
+
+    body = body_fn(plan, prefix)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -179,17 +282,13 @@ def render(plan: dict, styles_dir: Path, prefix: str) -> str:
 <div class="page-header">
   <h1>{esc(title)}</h1>
   <p>{esc(subtitle)}</p>
-  <p style="font-size: 12px; color: #64748b;">Generated by <code>repo-architecture/bin/render.py</code> · layout: three-column · style: {esc(style_name)}</p>
+  <p style="font-size: 12px; color: #64748b;">Generated by <code>repo-architecture/bin/render.py</code> · layout: {esc(layout)} · style: {esc(style_name)}</p>
 </div>
 <div style="{outer_inline}; margin: 0 auto;">
 <style scoped>{scoped_css}</style>
 <div class="{prefix}-title">{esc(title)}</div>
 <div class="{prefix}-subtitle">{esc(subtitle)}</div>
-<div class="{prefix}-wrapper">
-{left}
-<div class="{prefix}-main">{layers_html}</div>
-{right}
-</div>
+{body}
 </div>
 <div class="meta">Rendered from layer-plan.yaml — see repo-architecture/SKILL.md.</div>
 </body>
@@ -203,6 +302,7 @@ def main() -> int:
     ap.add_argument("--out", default="", help="output HTML path (default: <plan-stem>.html)")
     ap.add_argument("--prefix", default="ra", help="CSS class prefix to avoid collisions (default: ra)")
     ap.add_argument("--styles-dir", default="", help="override path to architecture/styles/")
+    ap.add_argument("--layouts-dir", default="", help="override path to architecture/layouts/")
     args = ap.parse_args()
 
     plan_path = Path(args.plan)
@@ -212,10 +312,11 @@ def main() -> int:
         return 1
 
     styles_dir = Path(args.styles_dir) if args.styles_dir else find_styles_dir(plan_path)
+    layouts_dir = Path(args.layouts_dir) if args.layouts_dir else find_layouts_dir(plan_path)
     out_path = Path(args.out) if args.out else plan_path.with_suffix(".html")
 
     try:
-        html_out = render(plan, styles_dir, args.prefix)
+        html_out = render(plan, styles_dir, layouts_dir, args.prefix)
     except (FileNotFoundError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

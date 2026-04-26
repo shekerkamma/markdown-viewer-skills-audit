@@ -8,7 +8,9 @@ metadata:
 
 # Repo → Architecture Diagram
 
-**Quick Start:** `bin/run.sh <owner/repo> [--scope <subpath>]` walks the four-phase pipeline end-to-end. Deterministic phases (extract, validate, render) run automatically; LLM phases (summarize, classify) prompt you to paste model output. Output: one self-contained HTML file plus an optional codeflow embed for the raw import graph.
+**Quick Start:** `bin/run.sh <owner/repo> [--scope <subpath>] [--auto]` walks the four-phase pipeline end-to-end. Deterministic phases (extract, validate, render) run automatically; LLM phases (summarize, classify) either prompt you to paste model output (default) or call the Anthropic API directly (`--auto`, needs `ANTHROPIC_API_KEY`). Output: one self-contained HTML file plus an optional codeflow embed for the raw import graph.
+
+**Tests:** `python3 -m unittest discover -s tests` from the skill root runs the smoke suite (12 tests, no network required, ~0.5s). CI runs on every push and PR via `.github/workflows/repo-architecture-tests.yml`.
 
 The `--scope` flag narrows extraction to a sub-tree (e.g. `--scope patterns/agents` on a broad repo). Use it when the full repo is too heterogeneous to classify into a single diagram — common for cookbooks, monorepos, and any repo where Phase 2 returns `error: refused`.
 
@@ -126,7 +128,18 @@ bin/render.py out/<repo>/layer-plan.yaml --out out/<repo>/diagram.html --prefix 
 
 The renderer reads the chosen style from `architecture/styles/<style>.md` directly — it never duplicates the CSS rules in code. When the architecture skill's style files change, render.py picks up the new palettes automatically.
 
-**v1 supports the three-column layout only.** Other layouts print a warning and fall back to three-column. Single-stack and pipeline support is an open follow-up.
+**Supported layouts:**
+
+| Layout | Use when | CSS source |
+|---|---|---|
+| `three-column` | Cross-cutting concerns (security, governance, monitoring) belong in sidebars | palette style file |
+| `single-stack` | Focused service or microservice view, no sidebars needed | palette style file |
+| `two-column-split` | One sidebar of cross-cutting concerns; the other side is irrelevant | palette style file |
+| `pipeline` | Horizontal data flow with sequential stages (ETL, CI/CD, event pipelines) | `architecture/layouts/pipeline.md` (palette ignored — stages don't have semantic colors) |
+
+For pipeline layout, a `layer_titles:` mapping in the plan overrides the default stage names (e.g. `user → "Ingest"`). Other layouts use the canonical layer titles.
+
+Anything else prints a warning and falls back to three-column.
 
 The `--prefix` flag controls the CSS class namespace (default `ra`) so multiple diagrams can be embedded on the same page without collisions.
 
