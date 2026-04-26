@@ -91,8 +91,15 @@ def main() -> int:
         return 1
 
     # 1.b — drill every dir, capped, auto-derived from the actual tree.
-    dirs = [e["name"] for e in tree if e["type"] == "dir"][:DRILL_CAP]
+    # Skip hidden dirs (.github, .devcontainer, .husky, .codesandbox …) — they're
+    # tooling metadata, not architecture. They burn drill slots without producing
+    # classifiable content.
+    all_dirs = [e["name"] for e in tree if e["type"] == "dir"]
+    dirs = [d for d in all_dirs if not d.startswith(".")][:DRILL_CAP]
+    skipped = [d for d in all_dirs if d.startswith(".")]
     print(f"drilling: {', '.join(dirs) if dirs else '<none>'}", file=sys.stderr)
+    if skipped:
+        print(f"skipped:  {', '.join(skipped)} (hidden dirs)", file=sys.stderr)
     subtrees: list[dict] = []
     for d in dirs:
         sub = fetch_tree(f"{anchor}/{d}")

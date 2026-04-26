@@ -8,7 +8,7 @@ metadata:
 
 # Repo → Architecture Diagram
 
-**Quick Start:** `repo-architecture <github-url> [--scope <subpath>]` → tree walk + README → LLM layer classification → render via [architecture](../architecture/SKILL.md). Output: one self-contained HTML file plus an optional codeflow embed for the raw import graph.
+**Quick Start:** `bin/run.sh <owner/repo> [--scope <subpath>]` walks the four-phase pipeline end-to-end. Deterministic phases (extract, validate, render) run automatically; LLM phases (summarize, classify) prompt you to paste model output. Output: one self-contained HTML file plus an optional codeflow embed for the raw import graph.
 
 The `--scope` flag narrows extraction to a sub-tree (e.g. `--scope patterns/agents` on a broad repo). Use it when the full repo is too heterogeneous to classify into a single diagram — common for cookbooks, monorepos, and any repo where Phase 2 returns `error: refused`.
 
@@ -114,13 +114,21 @@ bin/validate.py out/<repo>/layer-plan.yaml
 
 The validator accepts JSON or YAML (PyYAML required for YAML) and recognises the refusal schema (`error: refused` + `reason` + `recommendation`) — it relays the refusal to stdout and exits 2 so callers can branch.
 
-### Phase 3 — Render via architecture skill
+### Phase 3 — Render
 
-**First, check for a Phase 2 refusal.** If `layer-plan.md` starts with `error: refused`, do not render. Print the `reason` and `recommendation` fields to the user and stop. The expected next move is one of: re-run with `--scope <subpath>`, switch to the [architecture](../architecture/SKILL.md) skill from a prompt, or accept that this repo isn't a fit for a layered diagram.
+**First, check for a Phase 2 refusal.** If `layer-plan.yaml` is `error: refused`, do not render. Print the `reason` and `recommendation` fields to the user and stop. The expected next move is one of: re-run with `--scope <subpath>`, switch to the [architecture](../architecture/SKILL.md) skill from a prompt, or accept that this repo isn't a fit for a layered diagram. The validator handles this passthrough automatically (exit code 2).
 
-Otherwise, hand `layer-plan.md` to the [architecture](../architecture/SKILL.md) skill. Use a unique CSS class prefix (e.g. first 3 chars of the repo name) to avoid collisions if multiple diagrams are embedded on the same page.
+Otherwise, run [bin/render.py](bin/render.py):
 
-Output: `out/$REPO/<repo-name>.html` — self-contained, opens in any browser.
+```bash
+bin/render.py out/<repo>/layer-plan.yaml --out out/<repo>/diagram.html --prefix <css-prefix>
+```
+
+The renderer reads the chosen style from `architecture/styles/<style>.md` directly — it never duplicates the CSS rules in code. When the architecture skill's style files change, render.py picks up the new palettes automatically.
+
+**v1 supports the three-column layout only.** Other layouts print a warning and fall back to three-column. Single-stack and pipeline support is an open follow-up.
+
+The `--prefix` flag controls the CSS class namespace (default `ra`) so multiple diagrams can be embedded on the same page without collisions.
 
 ### Phase 4 — Optional codeflow embed
 
