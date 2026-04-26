@@ -59,28 +59,23 @@ Phase 3 calls into [architecture/SKILL.md](../architecture/SKILL.md). All six ru
 
 ### Phase 1 — Extract structure
 
+Run [bin/extract.py](bin/extract.py):
+
 ```bash
-REPO=<owner/name>
-mkdir -p out/$REPO
-# Tree (top 2 levels is usually enough)
-gh api repos/$REPO/contents/ --jq '.[] | {type, path}' > out/$REPO/tree.json
-# Manifests + README
-for f in README.md package.json pyproject.toml Cargo.toml go.mod requirements.txt; do
-  gh api repos/$REPO/contents/$f --jq '.content' 2>/dev/null | base64 -d > out/$REPO/$f 2>/dev/null
-done
-# Drill into directories that look architectural (src, app, agent, server, lib, services, packages)
-for d in src app agent server lib services packages mcp-server cmd internal; do
-  gh api repos/$REPO/contents/$d --jq '.[] | {type, path}' 2>/dev/null > out/$REPO/$d.tree.json
-done
+bin/extract.py <owner/repo> [--scope <subpath>] [--out <dir>]
 ```
 
-Combine these into `structure.json` with three fields:
+The script walks the top-level tree, drills into every top-level directory it finds (capped at 12, auto-derived — not a hard-coded list), pulls every recognised manifest that exists, and writes `structure.json` plus the raw `README.md` to `<out>/`. Missing manifests are skipped, not written as empty files. Hard deps: `python3` (stdlib only) and the `gh` CLI.
 
-- `tree` — concatenation of `tree.json` and every `<dir>.tree.json` produced above. Each entry is `{type, path}`.
-- `manifests` — map of filename → file content (utf-8 string). Drop any manifest that didn't exist in the repo (don't include empty entries).
-- `readme_summary` — a 200-word LLM summary of the README, *not* the raw README. The summary should answer: what the project does, who uses it, the core nouns/verbs in its domain, and what external systems it talks to. Pass the full README to the LLM; the summary is what reaches the classifier.
+`structure.json` has these fields:
 
-If `--scope <subpath>` was passed, anchor every `gh api` call at `repos/$REPO/contents/<subpath>` instead of the repo root, and prefix all paths in `tree` with the scope so the classifier knows where it is in the larger repo.
+- `repo`, `scope` — passed-through identifiers
+- `tree` — top-level entries as `[{type, path, name}, ...]`
+- `subtrees` — list of `{dir, entries}` for each drilled directory
+- `manifests` — map of filename → utf-8 content (only manifests that exist; never empty entries)
+- `readme_summary` — initially `null`. Phase 1.5 fills it via [prompts/summarize-readme.md](prompts/summarize-readme.md), which produces a 200-word grounded summary of `README.md`.
+
+The `--scope <subpath>` flag anchors all `gh api` calls at `repos/$REPO/contents/<subpath>` and is the recommended way to handle broad repos (cookbooks, monorepos) where Phase 2 would otherwise refuse.
 
 ### Phase 2 — Classify into layers
 
@@ -109,6 +104,15 @@ sidebars:
 - Every component has a non-empty `evidence` field.
 - At least 3 of the 6 standard layers are populated. Fewer means classification is too sparse — re-prompt or fall back to single-stack.
 - Layout must match complexity: ≤ 5 components → single-stack; pipeline-shaped data flow → pipeline; cross-cutting concerns → three-column.
+
+Run [bin/validate.py](bin/validate.py) to enforce the rules mechanically:
+
+```bash
+bin/validate.py out/<repo>/layer-plan.yaml
+# exit 0 = VALID  ·  exit 1 = INVALID (errors printed)  ·  exit 2 = REFUSED (passthrough)
+```
+
+The validator accepts JSON or YAML (PyYAML required for YAML) and recognises the refusal schema (`error: refused` + `reason` + `recommendation`) — it relays the refusal to stdout and exits 2 so callers can branch.
 
 ### Phase 3 — Render via architecture skill
 
