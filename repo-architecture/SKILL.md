@@ -1,0 +1,149 @@
+---
+name: repo-architecture
+description: Generate a layered HTML architecture diagram from a real GitHub repo URL. Walks the tree, classifies modules into semantic layers (user / application / ai / data / infra / external), picks an appropriate layout and style, and renders via the architecture skill. Pairs with codeflow for raw dependency graphs.
+metadata:
+  author: shekerkamma — addition to markdown-viewer/skills
+  depends_on: architecture
+---
+
+# Repo → Architecture Diagram
+
+**Quick Start:** `repo-architecture <github-url> [--scope <subpath>]` → tree walk + README → LLM layer classification → render via [architecture](../architecture/SKILL.md). Output: one self-contained HTML file plus an optional codeflow embed for the raw import graph.
+
+The `--scope` flag narrows extraction to a sub-tree (e.g. `--scope patterns/agents` on a broad repo). Use it when the full repo is too heterogeneous to classify into a single diagram — common for cookbooks, monorepos, and any repo where Phase 2 returns `error: refused`.
+
+## What this skill produces
+
+A publishable, layered architecture diagram derived from the actual code in a public GitHub repo — not a hand-drawn guess. Two views are produced:
+
+1. **Logical view** (primary) — semantic layers using the [architecture](../architecture/SKILL.md) skill template. This is the diagram you put in slide decks, RFCs, and onboarding docs.
+2. **Raw dependency view** (optional) — embedded [codeflow](https://github.com/braedonsaunders/codeflow) graph showing file-level imports. This is the diagram you use to find tight coupling, dead code, and circular deps.
+
+Both share one HTML file with two tabs.
+
+## When to use this skill vs. others
+
+| If you need… | Use |
+|---|---|
+| File-level import graph, interactive | [codeflow](https://github.com/braedonsaunders/codeflow) directly |
+| Hand-crafted layered diagram from a prompt | [architecture](../architecture/SKILL.md) |
+| C4 levels (Context / Container / Component) | [c4](../c4/SKILL.md) |
+| **Layered diagram derived from a real repo** | **repo-architecture** (this skill) |
+
+Pick this skill when you want the architecture skill's polish but don't want to hand-author the layer assignments. The tradeoff: the LLM classifier will be wrong on edge cases — you must review `layer-plan.md` before render.
+
+## Critical Rules
+
+### Rule 1: Three phases, three artifacts
+Always produce these intermediate files, in order, before render:
+
+1. `structure.json` — what the repo contains (tree, manifests, entry points)
+2. `layer-plan.md` — how each module maps to a semantic layer + chosen layout/style
+3. `<repo-name>.html` — the rendered diagram
+
+Never render directly from the URL. The intermediate files are the human override point — without them the skill is a black box.
+
+### Rule 2: Tree-walk first, codeflow second
+Codeflow is a browser app with no CLI. Do not depend on it for the logical view. Use `gh api` for tree extraction (Phase 1) and only embed codeflow as an iframe for the optional raw view (Phase 4). This keeps the skill runnable in headless environments.
+
+### Rule 3: Classification must cite evidence
+Every module assigned to a layer in `layer-plan.md` must include a one-line justification with a file path or manifest field. No "I think this is the data layer" — instead "data: `agent/tools/query_builder.py` builds OData queries; `mcp-server/src/odata-clients.ts` is the HTTP client."
+
+### Rule 4: Reuse the architecture skill — do not reinvent
+Phase 3 calls into [architecture/SKILL.md](../architecture/SKILL.md). All six rules from that skill apply to the rendered output (no `html` fences, no empty lines, semantic colors, etc.). This skill is a *front-end* for that skill, not a replacement.
+
+### Rule 5: Public repos only by default
+`gh api` works on private repos with auth, but the LLM classifier sees source code excerpts from the README and manifests. Default to public repos. For private repos, add an explicit `--allow-private` flag and warn the user that the classifier prompt will include private metadata.
+
+## Workflow
+
+### Phase 1 — Extract structure
+
+```bash
+REPO=<owner/name>
+mkdir -p out/$REPO
+# Tree (top 2 levels is usually enough)
+gh api repos/$REPO/contents/ --jq '.[] | {type, path}' > out/$REPO/tree.json
+# Manifests + README
+for f in README.md package.json pyproject.toml Cargo.toml go.mod requirements.txt; do
+  gh api repos/$REPO/contents/$f --jq '.content' 2>/dev/null | base64 -d > out/$REPO/$f 2>/dev/null
+done
+# Drill into directories that look architectural (src, app, agent, server, lib, services, packages)
+for d in src app agent server lib services packages mcp-server cmd internal; do
+  gh api repos/$REPO/contents/$d --jq '.[] | {type, path}' 2>/dev/null > out/$REPO/$d.tree.json
+done
+```
+
+Combine these into `structure.json` with three fields:
+
+- `tree` — concatenation of `tree.json` and every `<dir>.tree.json` produced above. Each entry is `{type, path}`.
+- `manifests` — map of filename → file content (utf-8 string). Drop any manifest that didn't exist in the repo (don't include empty entries).
+- `readme_summary` — a 200-word LLM summary of the README, *not* the raw README. The summary should answer: what the project does, who uses it, the core nouns/verbs in its domain, and what external systems it talks to. Pass the full README to the LLM; the summary is what reaches the classifier.
+
+If `--scope <subpath>` was passed, anchor every `gh api` call at `repos/$REPO/contents/<subpath>` instead of the repo root, and prefix all paths in `tree` with the scope so the classifier knows where it is in the larger repo.
+
+### Phase 2 — Classify into layers
+
+Feed `structure.json` to the LLM with the prompt at [prompts/classify-modules.md](prompts/classify-modules.md). Output schema:
+
+```yaml
+layout: three-column | pipeline | single-stack | two-column-split
+style: steel-blue | indigo-deep | ocean-teal | neon-dark | frost-clean | ...
+title: <repo title>
+subtitle: <one-line description>
+layers:
+  user:
+    - { name: "...", subtitle: "...", evidence: "<path or field>" }
+  application:
+    - { ... }
+  ai: [...]
+  data: [...]
+  infra: [...]
+  external: [...]
+sidebars:
+  left:  [{ title: "...", items: [...] }]
+  right: [{ title: "...", items: [...] }]
+```
+
+**Validation rules** (block render if violated):
+- Every component has a non-empty `evidence` field.
+- At least 3 of the 6 standard layers are populated. Fewer means classification is too sparse — re-prompt or fall back to single-stack.
+- Layout must match complexity: ≤ 5 components → single-stack; pipeline-shaped data flow → pipeline; cross-cutting concerns → three-column.
+
+### Phase 3 — Render via architecture skill
+
+**First, check for a Phase 2 refusal.** If `layer-plan.md` starts with `error: refused`, do not render. Print the `reason` and `recommendation` fields to the user and stop. The expected next move is one of: re-run with `--scope <subpath>`, switch to the [architecture](../architecture/SKILL.md) skill from a prompt, or accept that this repo isn't a fit for a layered diagram.
+
+Otherwise, hand `layer-plan.md` to the [architecture](../architecture/SKILL.md) skill. Use a unique CSS class prefix (e.g. first 3 chars of the repo name) to avoid collisions if multiple diagrams are embedded on the same page.
+
+Output: `out/$REPO/<repo-name>.html` — self-contained, opens in any browser.
+
+### Phase 4 — Optional codeflow embed
+
+If the user passes `--with-dependency-graph`, append a second tab to the HTML with a codeflow iframe:
+
+```html
+<iframe src="https://codeflow-five.vercel.app/?repo=<encoded-url>" width="100%" height="800"></iframe>
+```
+
+Verify codeflow accepts a `?repo=` query param before relying on this — fall back to a "click here to load in codeflow" link if not.
+
+## Failure modes
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Classifier puts everything in `application` | README is sparse / no manifests | Pass `--include-source-samples` to feed top-N file headers into the prompt |
+| Layout looks empty / one-sided | Repo has no infra or external deps in manifest | Acceptable — drop unused layers from the diagram, don't pad |
+| Same module appears in two layers | Genuine cross-cutting concern | Move to a sidebar (left = ops, right = security/governance) instead of duplicating |
+| Render fails Rule 2 from architecture skill (empty lines) | LLM injected blank lines in HTML | Run a post-pass that strips lines matching `^\s*$` inside the architecture HTML block |
+
+## Examples
+
+- [examples/sap-o2c-automation/](examples/sap-o2c-automation/) — full three-phase output for `github.com/shekerkamma/SAP-O2C-Automation`. The hand-rendered `architecture/demo-rendered/05-sap-o2c-automation.html` in this repo is the target output shape.
+
+## Honest limitations
+
+- **No code execution.** The classifier reads metadata, not behavior. A repo where every file is `utils.py` will get a useless diagram.
+- **TypeScript/Python/Go bias.** The manifest list above covers maybe 80% of repos. Niche stacks (Elixir mix, Erlang rebar, Nim, Zig) need explicit handling.
+- **Codeflow is a browser app.** The embed in Phase 4 requires the user to be online and CORS-allowed by codeflow-five.vercel.app. For air-gapped use, drop the embed and link to the locally-served clone instead.
+- **Not a replacement for human review.** The skill produces a *first draft* you edit, not a finished diagram. Treat `layer-plan.md` as the review surface.
