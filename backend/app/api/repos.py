@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,14 +17,28 @@ router = APIRouter(prefix="/api/v1/teams/{team_id}/repos", tags=["repositories"]
 
 
 class ConnectRepoRequest(BaseModel):
-    github_repo_full_name: str
+    github_repo_full_name: str = Field(pattern=r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
     trigger_labels: list[str] | None = None
+
+    @field_validator("trigger_labels")
+    @classmethod
+    def validate_labels(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            return [label.strip()[:50] for label in v if label.strip()][:20]
+        return v
 
 
 class UpdateRepoRequest(BaseModel):
     trigger_labels: list[str] | None = None
     is_active: bool | None = None
     config: dict | None = None
+
+    @field_validator("trigger_labels")
+    @classmethod
+    def validate_labels(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            return [label.strip()[:50] for label in v if label.strip()][:20]
+        return v
 
 
 async def _require_admin(team_id: uuid.UUID, user: User, session: AsyncSession):

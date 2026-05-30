@@ -20,6 +20,7 @@ class Ticket(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     labels: Mapped[dict] = mapped_column(JSONB, server_default="[]")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

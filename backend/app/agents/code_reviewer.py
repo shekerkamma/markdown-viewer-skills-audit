@@ -52,6 +52,8 @@ class CodeReviewerAgent(BaseAgent):
     async def run(self, context: dict) -> AgentResult:
         diff = context.get("diff", "")
         analysis = context.get("analysis", {})
+        repo_config = context.get("repo_config", {})
+        review_config = repo_config.get("review", {})
 
         await self.log_action("review_diff", {
             "diff_lines": len(diff.splitlines()),
@@ -93,21 +95,34 @@ Generated Fix (git diff):
                 f"security={dimensions.get('security', {}).get('score', 0)}"
             )
 
-            # Apply decision rules
+            # Apply decision rules — respect repo-level config overrides
+            min_confidence = review_config.get("min_confidence", 0.6)
+            require_tests = review_config.get("require_tests", True)
+            security_check = review_config.get("security_check", True)
+
             security_score = dimensions.get("security", {}).get("score", 0)
-            if security_score < 0.3:
+            tests_score = dimensions.get("tests", {}).get("score", 0)
+
+            # Skip test check if disabled
+            if not require_tests and tests_score < 0.3:
+                await self.log_observation("Test requirement disabled by repo config — ignoring low test score")
+
+            if security_check and security_score < 0.3:
                 overall = "reject"
                 await self.log_decision(
                     f"Rejecting: critical security issue (score={security_score})",
                     confidence,
                 )
-            elif 0.4 <= confidence <= 0.6:
+            elif not security_check and security_score < 0.3:
+                await self.log_observation("Security check disabled by repo config — skipping rejection")
+                overall = "escalate"
+            elif confidence < min_confidence and confidence >= 0.4:
                 overall = "escalate"
                 await self.log_decision(
                     f"Escalating: uncertain confidence ({confidence})",
                     confidence,
                 )
-            elif confidence > 0.6:
+            elif confidence >= min_confidence:
                 overall = "approve"
                 await self.log_decision(
                     f"Approving: high confidence ({confidence}), no critical issues",

@@ -1,9 +1,10 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from app.api.billing import PLAN_LIMITS
 from app.db import async_session_factory
 from app.models.pipeline_run import PipelineRun
 from app.models.repository import Repository
@@ -42,14 +43,41 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
         )
         repo = result.scalar_one_or_none()
 
-        # Load team owner for GitHub token
+        # Load team and owner for GitHub token
         result = await session.execute(
-            select(User)
-            .join(Team, Team.owner_id == User.id)
-            .where(Team.id == repo.team_id)
+            select(Team).where(Team.id == repo.team_id)
+        )
+        team = result.scalar_one_or_none()
+
+        result = await session.execute(
+            select(User).where(User.id == team.owner_id)
         )
         owner = result.scalar_one_or_none()
         github_token = owner.github_access_token if owner else ""
+
+        # Check ticket limit for current billing period
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        usage_result = await session.execute(
+            select(func.count())
+            .select_from(Ticket)
+            .where(
+                Ticket.repository_id.in_(
+                    select(Repository.id).where(Repository.team_id == team.id)
+                ),
+                Ticket.created_at >= month_start,
+            )
+        )
+        monthly_count = usage_result.scalar() or 0
+        plan_limit = PLAN_LIMITS.get(team.plan, 20)
+
+        if monthly_count > plan_limit:
+            ticket.status = "failed"
+            await session.commit()
+            logger.warning(
+                "Ticket %s rejected: team %s at %d/%d monthly limit",
+                ticket_id, team.id, monthly_count, plan_limit,
+            )
+            return f"Ticket {ticket_id} rejected: monthly ticket limit reached ({monthly_count}/{plan_limit})"
 
         # Create pipeline run
         pipeline_run = PipelineRun(
@@ -67,6 +95,7 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
         event_logger = EventLogger(session)
         claude_service = ClaudeService()
         escalation = EscalationHandler(pipeline_run.id, event_logger)
+        slack_url = (repo.config or {}).get("slack_webhook_url", "")
 
         # --- Step 1: Content Analysis ---
         researcher = ContentResearcherAgent(pipeline_run.id, event_logger, claude_service)
@@ -79,6 +108,15 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
 
         pipeline_run.analysis = analysis_result.output if isinstance(analysis_result.output, dict) else {}
         pipeline_run.tokens_used = analysis_result.tokens_used
+
+        if analysis_result.error and "APIConnectionError" in str(analysis_result.error):
+            ticket.status = "pending"
+            pipeline_run.status = "failed"
+            pipeline_run.escalation_reason = "Claude API unavailable — ticket will be retried"
+            pipeline_run.completed_at = datetime.now(timezone.utc)
+            await session.commit()
+            logger.warning("Claude API down for ticket %s — leaving as pending for retry", ticket_id)
+            return f"Ticket {ticket_id} queued for retry: Claude API unavailable"
 
         if not analysis_result.success:
             # Escalate
@@ -95,6 +133,7 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
                 agent_name="content_researcher",
                 reason=analysis_result.error or "Low confidence analysis",
                 partial_analysis=analysis_result.output,
+                slack_webhook_url=slack_url,
             )
             return f"Ticket {ticket_id} escalated: {analysis_result.error}"
 
@@ -127,6 +166,7 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
                 agent_name="code_act_agent",
                 reason=fix_result.error or "Failed to generate fix",
                 partial_analysis=analysis_result.output,
+                slack_webhook_url=slack_url,
             )
             return f"Ticket {ticket_id} escalated: {fix_result.error}"
 
@@ -143,6 +183,7 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
         review_result = await reviewer.run({
             "diff": pipeline_run.fix_diff,
             "analysis": analysis_result.output,
+            "repo_config": repo.config or {},
         })
 
         pipeline_run.review_result = review_result.output if isinstance(review_result.output, dict) else {}
@@ -162,6 +203,7 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
                 agent_name="code_reviewer",
                 reason=review_result.error or "Review failed",
                 partial_analysis=analysis_result.output,
+                slack_webhook_url=slack_url,
             )
             return f"Ticket {ticket_id} escalated: {review_result.error}"
 
@@ -195,6 +237,7 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
                 agent_name="pr_creator",
                 reason=pr_result.error or "PR creation failed",
                 partial_analysis=analysis_result.output,
+                slack_webhook_url=slack_url,
             )
             return f"Ticket {ticket_id} escalated: {pr_result.error}"
 

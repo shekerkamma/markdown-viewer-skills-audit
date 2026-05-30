@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379"
 
+    # Sentry
+    sentry_dsn: str = ""
+
     # Encryption
     encryption_key: str = ""
 

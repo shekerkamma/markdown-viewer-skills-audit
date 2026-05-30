@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import RepoList from "@/components/features/RepoList";
 import AddRepoDialog from "@/components/features/AddRepoDialog";
+import BillingSection from "@/components/features/BillingSection";
 
 interface Repo {
   id: string;
@@ -76,12 +77,18 @@ export default function SettingsPage() {
       )}
 
       {teamId && (
-        <AddRepoDialog
-          teamId={teamId}
-          isOpen={showAddDialog}
-          onClose={() => setShowAddDialog(false)}
-          onRepoAdded={fetchRepos}
-        />
+        <>
+          <div className="mt-8 border-t border-border pt-6">
+            <BillingSection teamId={teamId} />
+          </div>
+
+          <AddRepoDialog
+            teamId={teamId}
+            isOpen={showAddDialog}
+            onClose={() => setShowAddDialog(false)}
+            onRepoAdded={fetchRepos}
+          />
+        </>
       )}
     </div>
   );

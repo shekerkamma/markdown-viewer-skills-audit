@@ -1,20 +1,47 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import sentry_sdk
 
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limiting
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
+from app.api.error_handlers import register_error_handlers
 from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
 from app.api.repos import router as repos_router
 from app.api.sse import router as sse_router
 from app.api.teams import router as teams_router
 from app.api.tickets import router as tickets_router
+from app.api.analytics import router as analytics_router
+from app.api.billing import router as billing_router
 from app.api.webhooks import router as webhooks_router
 from app.config import settings
+
+if settings.sentry_dsn:
+    sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 app = FastAPI(
     title="TicketForge",
     description="From GitHub Issue to merged PR via multi-agent AI pipeline",
     version="0.1.0",
 )
+
+app.state.limiter = limiter
+register_error_handlers(app)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"error": "rate_limit_exceeded", "message": "Too many requests"},
+        headers={"Retry-After": str(exc.detail)},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,6 +59,16 @@ app.include_router(teams_router)
 app.include_router(repos_router)
 app.include_router(tickets_router)
 app.include_router(sse_router)
+app.include_router(analytics_router)
+app.include_router(billing_router)
+
+
+@app.middleware("http")
+async def add_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/health")

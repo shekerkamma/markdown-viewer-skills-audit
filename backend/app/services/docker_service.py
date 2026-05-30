@@ -14,8 +14,21 @@ class DockerService:
 
     def __init__(self):
         self.client = docker.from_env()
+        self._image_pulled = False
+
+    def ensure_image(self) -> None:
+        if self._image_pulled:
+            return
+        try:
+            self.client.images.get(self.IMAGE_NAME)
+            self._image_pulled = True
+        except docker.errors.ImageNotFound:
+            logger.info("Pulling sandbox image %s", self.IMAGE_NAME)
+            self.client.images.pull(self.IMAGE_NAME)
+            self._image_pulled = True
 
     async def create_sandbox(self, repo_url: str, branch: str = "main") -> str:
+        self.ensure_image()
         container = self.client.containers.run(
             self.IMAGE_NAME,
             detach=True,

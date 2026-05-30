@@ -3,15 +3,19 @@ import hmac
 import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 
 from app.config import settings
 from app.db import async_session_factory
+from app.models.pipeline_run import PipelineRun
 from app.models.repository import Repository
 from app.models.ticket import Ticket
 
 router = APIRouter(tags=["webhooks"])
 
+limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
 
 
@@ -23,6 +27,7 @@ def verify_signature(payload: bytes, signature: str | None, secret: str) -> bool
 
 
 @router.post("/api/webhooks/github")
+@limiter.limit("100/minute")
 async def github_webhook(
     request: Request,
     x_hub_signature_256: str | None = Header(None),
@@ -33,11 +38,34 @@ async def github_webhook(
     if not verify_signature(payload, x_hub_signature_256, settings.github_webhook_secret):
         raise HTTPException(401, detail="Invalid signature")
 
-    if x_github_event not in ("issues",):
+    if x_github_event not in ("issues", "pull_request"):
         return {"received": True, "action": "ignored", "reason": "unhandled event type"}
 
     data = await request.json()
     action = data.get("action")
+
+    # Handle PR closed events (merged or rejected)
+    if x_github_event == "pull_request" and action == "closed":
+        pr = data.get("pull_request", {})
+        pr_number = pr.get("number")
+        merged = pr.get("merged", False)
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(PipelineRun).where(PipelineRun.pr_number == pr_number)
+            )
+            pipeline_run = result.scalar_one_or_none()
+            if pipeline_run:
+                pipeline_run.pr_status = "merged" if merged else "rejected"
+                await session.commit()
+                logger.info(
+                    "PR #%d %s for pipeline run %s",
+                    pr_number,
+                    "merged" if merged else "rejected",
+                    pipeline_run.id,
+                )
+
+        return {"received": True, "action": "pr_status_updated"}
 
     if action not in ("opened", "labeled"):
         return {"received": True, "action": "ignored", "reason": f"unhandled action: {action}"}
@@ -75,6 +103,13 @@ async def github_webhook(
         if existing.scalar_one_or_none():
             return {"received": True, "action": "ignored", "reason": "ticket already exists"}
 
+        # Determine priority from labels
+        priority_map = {"critical": 0, "high": 1, "medium": 2, "low": 4}
+        priority = 3  # default (unlabeled)
+        for label in issue_labels:
+            if label.lower() in priority_map:
+                priority = min(priority, priority_map[label.lower()])
+
         # Create ticket
         ticket = Ticket(
             repository_id=repo.id,
@@ -83,6 +118,7 @@ async def github_webhook(
             title=issue.get("title", ""),
             body=issue.get("body"),
             labels=issue_labels,
+            priority=priority,
             status="pending",
         )
         session.add(ticket)

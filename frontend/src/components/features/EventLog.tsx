@@ -33,7 +33,7 @@ export default function EventLog({ events }: EventLogProps) {
   }
 
   return (
-    <div className="border border-border bg-surface">
+    <div className="border border-border bg-surface" role="log" aria-label="Pipeline event log">
       {events.map((event) => {
         const time = new Date(event.timestamp).toLocaleTimeString();
         const color = EVENT_TYPE_COLORS[event.event_type] || "text-on-surface-muted";
@@ -43,6 +43,8 @@ export default function EventLog({ events }: EventLogProps) {
           <div key={event.id} className="border-b border-border last:border-b-0">
             <button
               onClick={() => setExpandedId(isExpanded ? null : event.id)}
+              aria-expanded={isExpanded}
+              aria-label={`${event.event_type} event from ${event.agent_name} at ${time}`}
               className="flex w-full items-start gap-3 px-4 py-2 text-left font-mono text-xs transition-colors hover:bg-surface-overlay"
             >
               <span className="shrink-0 text-on-surface-muted">{time}</span>

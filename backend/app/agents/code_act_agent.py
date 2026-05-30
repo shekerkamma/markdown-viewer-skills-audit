@@ -59,7 +59,15 @@ class CodeActAgent(BaseAgent):
         container_id = None
         try:
             # Create sandbox
-            container_id = await self.docker.create_sandbox(repo_url, branch)
+            try:
+                container_id = await self.docker.create_sandbox(repo_url, branch)
+            except Exception as e:
+                await self.log_error(f"Failed to clone repo or create sandbox: {e}")
+                return AgentResult(
+                    success=False,
+                    error=f"Repository clone failed — check permissions and repo URL: {e}",
+                    tokens_used=0,
+                )
             await self.log_action("sandbox_created", {"container_id": container_id[:12]})
 
             # Read affected files
@@ -75,6 +83,18 @@ class CodeActAgent(BaseAgent):
             await self.log_observation(
                 f"Read {len(file_contents)} files from sandbox"
             )
+
+            # Capture pre-existing test failures as baseline
+            baseline_test_output = await self.docker.exec_in_sandbox(
+                container_id,
+                "cd /workspace/repo && python -m pytest --tb=short -q 2>&1 || "
+                "npm test 2>&1 || echo 'NO_TEST_RUNNER'",
+            )
+            has_preexisting_failures = "FAILED" in baseline_test_output or "ERROR" in baseline_test_output
+            if has_preexisting_failures:
+                await self.log_observation(
+                    f"Pre-existing test failures detected (will compare before/after): {baseline_test_output[:300]}"
+                )
 
             # If no files specified, try to find relevant files from the problem
             if not file_contents:
@@ -125,7 +145,12 @@ Source Files:
 
                 await self.log_observation(f"Test run (iteration {iteration}): {test_output[:500]}")
 
-                if "FAILED" not in test_output and "ERROR" not in test_output:
+                # Pass if: no failures, or no new failures compared to baseline
+                tests_pass = (
+                    ("FAILED" not in test_output and "ERROR" not in test_output)
+                    or (has_preexisting_failures and test_output.count("FAILED") <= baseline_test_output.count("FAILED"))
+                )
+                if tests_pass:
                     fix_diff = await self.docker.get_diff(container_id)
                     await self.log_decision(
                         f"Fix generated and tests pass (iteration {iteration})",

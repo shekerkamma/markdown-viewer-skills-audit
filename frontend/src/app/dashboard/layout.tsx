@@ -32,7 +32,7 @@ export default function DashboardLayout({
 
   return (
     <div className="flex min-h-screen">
-      <nav className="w-60 border-r border-border bg-surface p-4">
+      <nav className="w-60 border-r border-border bg-surface p-4" aria-label="Main navigation">
         <div className="mb-8">
           <h2 className="text-lg font-semibold text-on-surface">TicketForge</h2>
         </div>

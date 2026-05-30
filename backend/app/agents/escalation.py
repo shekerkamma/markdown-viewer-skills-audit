@@ -4,6 +4,7 @@ import uuid
 from app.agents.base import AgentResult, BaseAgent
 from app.services.event_logger import EventLogger
 from app.services.github_service import GitHubService
+from app.services.slack_service import notify_escalation
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class EscalationHandler(BaseAgent):
         agent_name: str,
         reason: str,
         partial_analysis: dict | str | None = None,
+        slack_webhook_url: str = "",
     ) -> AgentResult:
         await self.log_action("escalate", {
             "repo": repo_full_name,
@@ -47,6 +49,16 @@ class EscalationHandler(BaseAgent):
             await self.log_observation(
                 f"Escalation comment posted on {repo_full_name}#{issue_number}"
             )
+            # Send Slack notification if configured
+            if slack_webhook_url:
+                await notify_escalation(
+                    webhook_url=slack_webhook_url,
+                    repo_full_name=repo_full_name,
+                    issue_number=issue_number,
+                    agent_name=agent_name,
+                    reason=reason,
+                )
+
             return AgentResult(success=True, output={"comment_posted": True})
         except Exception as e:
             await self.log_error(f"Failed to post escalation comment: {e}")
