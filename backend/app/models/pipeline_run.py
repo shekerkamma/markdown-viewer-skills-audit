@@ -1,8 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -11,9 +10,9 @@ from app.db import Base
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     ticket_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="running")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -21,9 +20,9 @@ class PipelineRun(Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Agent outputs
-    analysis: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     fix_diff: Mapped[str | None] = mapped_column(Text, nullable=True)
-    review_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    review_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # PR info
     pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -1,13 +1,17 @@
+import contextlib
+
 import sentry_sdk
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limiting
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api.error_handlers import register_error_handlers
+from app.db import engine, Base
+import app.models  # noqa: F401 — register models with Base metadata
 from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
 from app.api.repos import router as repos_router
@@ -22,12 +26,21 @@ from app.config import settings
 if settings.sentry_dsn:
     sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
 
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
+
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 app = FastAPI(
     title="TicketForge",
     description="From GitHub Issue to merged PR via multi-agent AI pipeline",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter
