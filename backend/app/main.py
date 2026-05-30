@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
+from app.api.repos import router as repos_router
+from app.api.sse import router as sse_router
+from app.api.teams import router as teams_router
+from app.api.tickets import router as tickets_router
 from app.api.webhooks import router as webhooks_router
 from app.config import settings
 
@@ -24,6 +28,10 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(webhooks_router)
 app.include_router(dashboard_router)
+app.include_router(teams_router)
+app.include_router(repos_router)
+app.include_router(tickets_router)
+app.include_router(sse_router)
 
 
 @app.get("/api/health")
