@@ -12,7 +12,10 @@ from app.models.user import User
 from app.models.team import Team
 from app.agents.content_researcher import ContentResearcherAgent
 from app.agents.code_act_agent import CodeActAgent
+from app.agents.code_reviewer import CodeReviewerAgent
 from app.agents.escalation import EscalationHandler
+from app.agents.pr_creator import PRCreatorAgent
+from app.services.github_service import GitHubService
 from app.services.claude_service import ClaudeService
 from app.services.docker_service import DockerService
 from app.services.event_logger import EventLogger
@@ -130,9 +133,78 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
         # Save the diff
         fix_output = fix_result.output if isinstance(fix_result.output, dict) else {}
         pipeline_run.fix_diff = fix_output.get("diff", "")
+        await session.commit()
 
-        # Mark as done (review + PR creation handled in Phase 2)
-        ticket.status = "generating"  # Will become "reviewing" in Phase 2
+        # --- Step 3: Code Review ---
+        ticket.status = "reviewing"
+        await session.commit()
+
+        reviewer = CodeReviewerAgent(pipeline_run.id, event_logger, claude_service)
+        review_result = await reviewer.run({
+            "diff": pipeline_run.fix_diff,
+            "analysis": analysis_result.output,
+        })
+
+        pipeline_run.review_result = review_result.output if isinstance(review_result.output, dict) else {}
+        pipeline_run.tokens_used = review_result.tokens_used
+
+        if not review_result.success:
+            ticket.status = "escalated"
+            pipeline_run.status = "escalated"
+            pipeline_run.escalation_reason = review_result.error
+            pipeline_run.completed_at = datetime.now(timezone.utc)
+            await session.commit()
+
+            await escalation.escalate(
+                repo_full_name=repo.full_name,
+                issue_number=ticket.github_issue_number,
+                github_token=github_token,
+                agent_name="code_reviewer",
+                reason=review_result.error or "Review failed",
+                partial_analysis=analysis_result.output,
+            )
+            return f"Ticket {ticket_id} escalated: {review_result.error}"
+
+        # --- Step 4: PR Creation ---
+        github_service = GitHubService()
+        pr_agent = PRCreatorAgent(
+            pipeline_run.id, event_logger, docker_service, github_service
+        )
+        pr_result = await pr_agent.run({
+            "repo_full_name": repo.full_name,
+            "repo_url": f"https://github.com/{repo.full_name}.git",
+            "issue_number": ticket.github_issue_number,
+            "diff": pipeline_run.fix_diff,
+            "analysis": analysis_result.output if isinstance(analysis_result.output, dict) else {},
+            "review": review_result.output if isinstance(review_result.output, dict) else {},
+            "github_token": github_token,
+        })
+
+        if not pr_result.success:
+            # Retry once, then escalate with diff saved
+            ticket.status = "escalated"
+            pipeline_run.status = "escalated"
+            pipeline_run.escalation_reason = pr_result.error
+            pipeline_run.completed_at = datetime.now(timezone.utc)
+            await session.commit()
+
+            await escalation.escalate(
+                repo_full_name=repo.full_name,
+                issue_number=ticket.github_issue_number,
+                github_token=github_token,
+                agent_name="pr_creator",
+                reason=pr_result.error or "PR creation failed",
+                partial_analysis=analysis_result.output,
+            )
+            return f"Ticket {ticket_id} escalated: {pr_result.error}"
+
+        # Success — update pipeline run with PR info
+        pr_output = pr_result.output if isinstance(pr_result.output, dict) else {}
+        pipeline_run.pr_number = pr_output.get("pr_number")
+        pipeline_run.pr_url = pr_output.get("pr_url")
+        pipeline_run.pr_status = "open"
+
+        ticket.status = "pr_created"
         pipeline_run.status = "completed"
         pipeline_run.completed_at = datetime.now(timezone.utc)
         if pipeline_run.started_at:
@@ -140,5 +212,10 @@ async def run_pipeline(ctx: dict, ticket_id: str) -> str:
             pipeline_run.duration_seconds = int(delta.total_seconds())
         await session.commit()
 
-        logger.info("Pipeline completed for ticket %s — fix generated", ticket_id)
-        return f"Pipeline completed for ticket {ticket_id}"
+        logger.info(
+            "Pipeline completed for ticket %s — PR #%s created: %s",
+            ticket_id,
+            pipeline_run.pr_number,
+            pipeline_run.pr_url,
+        )
+        return f"Pipeline completed for ticket {ticket_id} — PR #{pipeline_run.pr_number}"
