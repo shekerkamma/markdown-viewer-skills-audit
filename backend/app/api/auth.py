@@ -94,6 +94,20 @@ async def github_callback(code: str = Query(...)):
     return RedirectResponse(url=f"{settings.app_url}/auth/callback?token={token}")
 
 
+@router.get("/dev-login")
+async def dev_login():
+    """Local dev only — bypass GitHub OAuth with the first user in the DB."""
+    async with async_session_factory() as session:
+        result = await session.execute(select(User).limit(1))
+        user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(404, detail="No users in DB. Seed test data first.")
+
+    token = create_jwt(str(user.id), user.github_login)
+    return RedirectResponse(url=f"{settings.app_url}/auth/callback?token={token}")
+
+
 @router.post("/refresh")
 async def refresh_token():
     # Placeholder — will be wired up with auth dependency in TASK-010
